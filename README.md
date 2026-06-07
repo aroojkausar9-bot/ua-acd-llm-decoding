@@ -4,9 +4,9 @@
 Track A: Research-Oriented Project
 
 **Team**
-- Areeba Hassan (536789)
-- Arooj Kausar (536739)
-- Syeda Kisaa Fatima (539682)
+- Arooj Kausar
+- Areeba Hassan 
+- Syeda Kisaa Fatima 
 
 ---
 
@@ -53,8 +53,7 @@ project/
   artifacts/
     logs/                       # Saved CSVs from Kaggle run
   reports/
-    A4/
-      A4_Report.pdf             # Compiled report PDF
+      Report.pdf             # Compiled report PDF
       main.tex                  # LaTeX source
       bibliography.bib
       acl.sty                   # ACL style file (included for clean-env compilation)
@@ -125,17 +124,17 @@ python -m pytest tests/ -v
 
 ## Compiling the Report
 
-The LaTeX source is fully self-contained in `reports/A4/`. All required style files (`acl.sty`, `acl_natbib.bst`) are included so it compiles in a clean environment without any additional installation.
+The LaTeX source is fully self-contained in `reports/`. All required style files (`acl.sty`, `acl_natbib.bst`) are included so it compiles in a clean environment without any additional installation.
 
 ```bash
-cd reports/A4
+cd reports
 pdflatex main.tex
 bibtex main
 pdflatex main.tex
 pdflatex main.tex
 ```
 
-The compiled PDF is also provided as `reports/A4/A4_Report.pdf`.
+The compiled PDF is also provided as `reports/Report.pdf`.
 
 ---
 
