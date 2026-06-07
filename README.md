@@ -1,7 +1,7 @@
 # Evaluating and Improving Factual Consistency in Long-Form LLM Generation
 
-**CS-818: Large Language Models — Assignment 4**
-Track A: Research-Oriented Project
+**Large Language Models**
+  Research-Oriented Project
 
 **Team**
 - Arooj Kausar
