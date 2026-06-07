@@ -1,0 +1,59 @@
+# UA-ACD default configuration
+# All hyperparameters are documented here. Pass --config to override.
+
+model:
+  generator_model_id: "microsoft/phi-2"
+  nli_model_id: "cross-encoder/nli-deberta-v3-small"
+  embed_model_id: "sentence-transformers/all-MiniLM-L6-v2"
+  load_in_4bit: true          # requires bitsandbytes; set false for CPU-only runs
+
+generation:
+  max_new_tokens: 256
+  num_return_sequences: 4
+  temperature: 0.8
+  top_p: 0.92
+  do_sample: true
+  min_new_tokens: 80
+
+retrieval:
+  top_k: 5
+  bm25_weight: 0.5
+
+uncertainty:
+  low_threshold: 0.30
+  high_threshold: 0.70
+  entropy_weight: 0.5
+  consistency_weight: 0.5
+  n_samples: 4
+
+nli_thresholds:
+  low: 0.60
+  mid: 0.75
+  high: 0.85
+  min_passages_strict: 2
+
+reranking:
+  alpha_factuality: 0.6
+  alpha_fluency: 0.4
+
+decoding_modulation:         # UA-ACD-Dec-Mod only
+  temp_focused: 0.55
+  temp_balanced: 0.75
+  temp_explore: 0.90
+  low_entropy_thresh: 1.5    # nats
+  high_entropy_thresh: 3.5   # nats
+  top_k_focused: 20
+  top_k_balanced: 50
+  top_k_explore: 100
+
+evaluation:
+  n_eval_samples: 50
+  granularity: "sentence"    # or "atomic"
+  seed: 42
+
+static_baseline:
+  nli_threshold: 0.75
+
+output:
+  results_dir: "artifacts/logs"
+  figures_dir: "figures"

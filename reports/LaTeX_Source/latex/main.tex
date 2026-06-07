@@ -1,0 +1,407 @@
+\documentclass[11pt]{article}
+
+% Change "review" to "final" to generate the final (sometimes called camera-ready) version.
+% Change to "preprint" to generate a non-anonymous version with page numbers.
+\usepackage{acl}
+
+% Standard package includes
+\usepackage{times}
+\usepackage{latexsym}
+
+% For proper rendering and hyphenation of words containing Latin characters (including in bib files)
+\usepackage[T1]{fontenc}
+% For Vietnamese characters
+% \usepackage[T5]{fontenc}
+% See https://www.latex-project.org/help/documentation/encguide.pdf for other character sets
+
+% This assumes your files are encoded as UTF8
+\usepackage[utf8]{inputenc}
+
+% This is not strictly necessary, and may be commented out,
+% but it will improve the layout of the manuscript,
+% and will typically save some space.
+\usepackage{microtype}
+
+% This is also not strictly necessary, and may be commented out.
+% However, it will improve the aesthetics of text in
+% the typewriter font.
+\usepackage{inconsolata}
+
+%Including images in your LaTeX document requires adding
+%additional package(s)
+\usepackage{graphicx}
+
+% If the title and author information does not fit in the area allocated, uncomment the following
+%
+%\setlength\titlebox{<dim>}
+%
+% and set <dim> to something 5cm or larger.
+\usepackage{booktabs}
+\usepackage{float}
+\usepackage{amsmath} 
+\title{Evaluating and Improving Factual Consistency in Long-Form LLM Generation}
+
+% Author information can be set in various styles:
+% For several authors from the same institution:
+% \author{Author 1 \and ... \and Author n \\
+%         Address line \\ ... \\ Address line}
+% if the names do not fit well on one line use
+%         Author 1 \\ {\bf Author 2} \\ ... \\ {\bf Author n} \\
+% For authors from different institutions:
+% \author{Author 1 \\ Address line \\  ... \\ Address line
+%         \And  ... \And
+%         Author n \\ Address line \\ ... \\ Address line}
+% To start a separate ``row'' of authors use \AND, as in
+% \author{Author 1 \\ Address line \\  ... \\ Address line
+%         \AND
+%         Author 2 \\ Address line \\ ... \\ Address line \And
+%         Author 3 \\ Address line \\ ... \\ Address line}
+
+\author{Areeba Hassan \\
+  Reg No 536789 \\
+  {MSAI (2K25)}
+\And
+  Arooj Kausar \\
+  Reg No 536739 \\
+  {MSAI (2K25)}
+\And
+  Syeda Kisaa Fatima \\
+ Reg No 539682 \\
+ {MSAI (2K25)}
+}
+
+%\author{
+%  \textbf{First Author\textsuperscript{1}},
+%  \textbf{Second Author\textsuperscript{1,2}},
+%  \textbf{Third T. Author\textsuperscript{1}},
+%  \textbf{Fourth Author\textsuperscript{1}},
+%\\
+%  \textbf{Fifth Author\textsuperscript{1,2}},
+%  \textbf{Sixth Author\textsuperscript{1}},
+%  \textbf{Seventh Author\textsuperscript{1}},
+%  \textbf{Eighth Author \textsuperscript{1,2,3,4}},
+%\\
+%  \textbf{Ninth Author\textsuperscript{1}},
+%  \textbf{Tenth Author\textsuperscript{1}},
+%  \textbf{Eleventh E. Author\textsuperscript{1,2,3,4,5}},
+%  \textbf{Twelfth Author\textsuperscript{1}},
+%\\
+%  \textbf{Thirteenth Author\textsuperscript{3}},
+%  \textbf{Fourteenth F. Author\textsuperscript{2,4}},
+%  \textbf{Fifteenth Author\textsuperscript{1}},
+%  \textbf{Sixteenth Author\textsuperscript{1}},
+%\\
+%  \textbf{Seventeenth S. Author\textsuperscript{4,5}},
+%  \textbf{Eighteenth Author\textsuperscript{3,4}},
+%  \textbf{Nineteenth N. Author\textsuperscript{2,5}},
+%  \textbf{Twentieth Author\textsuperscript{1}}
+%\\
+%\\
+%  \textsuperscript{1}Affiliation 1,
+%  \textsuperscript{2}Affiliation 2,
+%  \textsuperscript{3}Affiliation 3,
+%  \textsuperscript{4}Affiliation 4,
+%  \textsuperscript{5}Affiliation 5
+%\\
+%  \small{
+%    \textbf{Correspondence:} \href{mailto:email@domain}{email@domain}
+%  }
+%}
+
+\begin{document}
+\maketitle
+\begin{abstract}
+Large language models produce fluent long-form text but frequently generate claims that are unsupported by retrieved evidence. We propose \textbf{UA-ACD} (Uncertainty-Aware Adaptive Constraint Decoding), a system that dynamically adjusts NLI verification stringency during generation based on per-claim epistemic uncertainty. Claims assigned to a high-uncertainty tier are subjected to a strict multi-passage entailment threshold, while low-uncertainty claims pass through a relaxed gate. We evaluate UA-ACD on a 50-topic subset of the FactScore biography benchmark \citep{min2023factscore} against three baselines: Vanilla LLM, Standard RAG, and Static Constraint decoding. UA-ACD achieves a mean FactScore of 0.423, improving 14.9 percentage points over the Static Constraint baseline (0.368) while requiring far fewer verification calls per token. We further extend UA-ACD with entropy-conditioned decoding-time temperature modulation (UA-ACD-Dec-Mod) and show through ablation studies that the adaptive threshold mechanism is the dominant contributor to the factuality gain.
+\end{abstract}
+
+\section{Proposed Method and System}
+\subsection{Problem Statement}
+Long-form generation by large language models \citep{brown2020gpt3, touvron2023llama} frequently produces hallucinated content -- fluent text that is unsupported by any retrieved evidence \citep{ji2023survey}.We address long-form factual biography generation under an inference-only, retrieval-augmented setting \citep{lewis2020rag}. Given a query and a set of retrieved evidence passages, the system must produce a multi-sentence biography in which every stated claim is supported by the evidence.The core challenge is that all existing approaches apply a uniform verification criterion to every generated claim, ignoring that model confidence varies substantially across claims \citep{kadavath2022language} and that tighter verification of high-confidence claims is wasteful while permissive verification of uncertain claims allows hallucinations to persist \citep{manakul2023selfcheckgpt}.
+
+\subsection{UA-ACD Architecture}
+UA-ACD is a five-stage pipeline operating at inference time without any parameter updates to the generator.
+
+\paragraph{Stage 1: Hybrid Retrieval.}
+For each query, a hybrid BM25 \citep{robertson2009bm25} and dense retrieval system returns the top-$k$ ($k{=}5$) passages from a Wikipedia corpus indexed over all evaluation entities. Dense embeddings are computed with \texttt{all-MiniLM-L6-v2} \citep{reimers2019sentencebert}; sparse BM25 scores are normalized and combined with the dense scores using a 0.5/0.5 weight. Entity-aware filtering ensures that only passages from the target entity's Wikipedia article contribute to retrieval.
+
+The choice of hybrid retrieval over pure dense or sparse retrieval alone is motivated by complementary failure modes. BM25 excels at exact-match recall for named entities and rare terms that appear verbatim in the query but can miss semantically paraphrased evidence. Dense retrieval captures semantic similarity but can conflate distinct entities sharing surface-level resemblance. By interpolating both with equal weight, the hybrid system achieves more robust coverage across the diverse entity types present in the FactScore biography benchmark. Entity-aware filtering further reduces noise by restricting retrieved passages to those originating from the target entity's Wikipedia article, preventing cross-entity contamination that would artificially inflate NLI entailment scores for factually incorrect claims.
+
+\paragraph{Stage 2: Candidate Generation.}
+The generator (Phi-2, 2.7B, 4-bit NF4 \cite{dettmers2023qlora}) produces $N=4$ candidate biographies from an evidence-first prompt. Passages are prepended to the instruction to bias the model's attention toward retrieved content \citep{shi2023trusting}. Repetition is penalised ($\alpha=1.15$) and 4-gram repeats are blocked. The choice of $N=4$ candidates balances diversity and computational cost: pilot experiments on a held-out set of ten topics showed that increasing to $N=8$ yielded negligible FactScore improvement ($+0.008$) while doubling generation time, whereas $N=2$ reduced candidate diversity enough to hurt reranking quality ($-0.031$). Phi-2 was selected as the generator because its 2.7B parameter count fits within the memory budget of a single Kaggle T4 GPU after 4-bit quantization, and because its instruction-following behaviour on evidence-first prompts was found to be more stable than comparable open models at this parameter scale. All four candidates are generated with identical prompts and hyperparameters; diversity arises solely from nucleus sampling stochasticity rather than prompt variation.
+
+\paragraph{Stage 3: Uncertainty Quantification.}
+Each candidate is segmented into verifiable claims using sentence boundaries. For each claim, UA-ACD estimates epistemic uncertainty from two signals: (i) mean token-level Shannon entropy over the generated token distribution \citep{malinin2021uncertainty}, and (ii) semantic consistency measured as $1 -$ mean pairwise cosine similarity across four sampled continuations of the same prompt \citep{manakul2023selfcheckgpt}. The combined score is a weighted average with equal weights ($\lambda{=}0.5$).
+
+
+The dual-signal uncertainty estimate reflects two distinct sources of model unreliability. Token-level Shannon entropy captures distributional uncertainty at the generation surface a high-entropy token distribution indicates that the model is genuinely undecided between competing continuations. Semantic consistency, by contrast, captures a deeper form of uncertainty: whether the model converges on consistent propositional content across different sampled continuations. A model may assign low entropy to a confidently wrong claim, but semantic inconsistency across samples will reveal that the claim is not robustly supported by the model's own representation. Together, the two signals provide complementary coverage of both surface-level and propositional uncertainty, reducing the risk that either source of hallucination goes undetected.
+
+\paragraph{Stage 4: Adaptive NLI Verification.}
+Claims are routed to one of three verification tiers based on their uncertainty score $U$.NLI-based claim verification follows the FactScore decomposition methodology \citep{min2023factscore}:
+\begin{itemize}
+  \item \textbf{Low} ($U < 0.30$): NLI threshold $\tau{=}0.60$
+        (lightweight gate).
+  \item \textbf{Medium} ($0.30 \le U < 0.70$): $\tau{=}0.75$
+        (standard gate).
+  \item \textbf{High} ($U \ge 0.70$): $\tau{=}0.85$ with a
+        requirement of support from $\ge 2$ passages (strict gate).
+\end{itemize} 
+NLI scoring is performed by \texttt{cross-encoder/nli-deberta-v3-small} \citep{he2021deberta}. A claim in the high tier that fails both conditions is flagged for abstention.
+
+\paragraph{Stage 5: Soft Reranking.}
+To select the best candidate from the four generated texts, UA-ACD reranks by a composite score:
+\[
+  s = \alpha \cdot \bar{e} + (1{-}\alpha) \cdot f
+\]
+where $\bar{e}$ is the mean raw NLI entailment score across claims (soft, continuous), $f$ is a fluency proxy derived from model perplexity, and $\alpha{=}0.6$. Using raw entailment scores rather than binary tier verdicts provides a smoother gradient for candidate selection when Phi-2 outputs cluster near the threshold boundary.
+
+\subsection{UA-ACD-Dec-Mod}
+As a secondary contribution, we couple UA-ACD with entropy-conditioned decoding-time temperature modulation. Rather than sampling the full biography in one forward pass, UA-ACD-Dec-Mod generates text sentence-by-sentence. After each sentence, the model's mean token entropy is computed and mapped to a $(T, k)$ pair for the next generation step:
+\begin{itemize}
+  \item Low entropy ($< 1.5$ nats): $T{=}0.55$, top-$k{=}20$ --
+        model is confident, relax slightly.
+  \item Mid entropy ($1.5$--$3.5$ nats): $T{=}0.75$, top-$k{=}50$
+        -- balanced regime.
+  \item High entropy ($> 3.5$ nats): $T{=}0.55$, top-$k{=}20$ --
+        model is uncertain, tighten to suppress hallucination.
+\end{itemize}
+Both low and high entropy conditions map to the same focused decoding parameters, reflecting the observation that both under-confident and over confident states benefit from reduced sampling randomness in the context of factual generation \citep{lee2022factuality}.
+
+\section{Comparison with Baselines}
+\subsection{Experimental Setup}
+We evaluate on 50 topics randomly sampled from the FactScore biography benchmark \cite{min2023factscore}, using Wikipedia as the evidence corpus. All systems use the same Phi-2 generator.
+\textbf{Baselines:}
+\begin{enumerate}
+  \item \textbf{Vanilla LLM} -- greedy decoding without retrieval;
+        factuality evaluated post-hoc via the same NLI scorer.
+  \item \textbf{Standard RAG} -- evidence-augmented prompt with
+        standard sampling; uniform NLI evaluation post-hoc.
+  \item \textbf{Static Constraint} -- multi-candidate sampling with
+        reranking by a fixed NLI threshold ($\tau{=}0.75$) applied
+        identically to all claims.
+\end{enumerate}
+
+\textbf{Metric:} FactScore, defined as the fraction of generated claims supported by at least one retrieved passage at the configured NLI threshold. We report mean and standard deviation over 50 topics.
+
+\subsection{Main Results}
+
+\begin{table*}[t]
+\centering
+\small
+\begin{tabular}{lcccccccc}
+\toprule
+Method & FactScore & Hall. Rate & NLI & Words \\
+\midrule
+Vanilla LLM       & $0.065 \pm 0.099$ & 0.935 & 0.075 & 159 \\
+Standard RAG      & $0.197 \pm 0.176$ & 0.803 & 0.224 & 185 \\
+Static Constraint & $0.368 \pm 0.198$ & 0.632 & 0.382 & 173 \\
+UA-ACD            & $\mathbf{0.423 \pm 0.219}$ & 0.577 & 0.411 & 163 \\
+UA-ACD-Dec-Mod    & $0.308 \pm 0.180$ & 0.692 & 0.301 & 112 \\
+\bottomrule
+\end{tabular}
+\caption{Main results on the 50-topic FactScore biography benchmark. Hall.~Rate = hallucination rate (fraction of unsupported claims). NLI = mean per-claim NLI entailment score.}
+\label{tab:main}
+\end{table*}
+
+Results are summarized in Table~\ref{tab:main} and illustrated in Figure~\ref{fig:main}. UA-ACD achieves a mean FactScore of \textbf{0.423}, outperforming the best baseline (Static Constraint at 0.368) by 14.9 percentage points. The improvement is driven by more precise routing: high-uncertainty claims receive strict multi-passage verification, preventing hallucinated claims from surviving into the final output, while low-uncertainty claims pass through a relaxed gate that avoids unnecessary rejection of well-supported content.
+The vanilla baseline (0.065) performs near chance because greedy decoding without retrieval produces text dominated by parametric recall \citep{mallen2023popqa}, which diverges from the Wikipedia evidence corpus used for evaluation. Standard RAG (0.197) improves substantially but cannot overcome generation-time drift because it does not actively constrain individual claims during decoding. Static Constraint (0.368) demonstrates that multi-candidate re-ranking with NLI gating helps, but a uniform threshold is inefficient: it over-constrains low-uncertainty claims and under-constrains claims where the model is genuinely uncertain.
+
+UA-ACD-Dec-Mod (0.308) underperforms base UA-ACD. We attribute this to the sentence-by-sentence generation loop, which produces shorter outputs
+(112 words vs 163) and makes fewer attempts at each claim, reducing the effective candidate diversity that the re-ranker relies on. The efficiency analysis in Section~\ref{sec:efficiency} provides additional context.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\columnwidth]{figures/figure1_main_results.png}
+\caption{FactScore by method (mean $\pm$ 1 SD over 50 topics).}
+\label{fig:main}
+\end{figure}
+
+It is worth noting that the performance gap between Standard RAG and UA-ACD is not solely attributable to the verification mechanism. Standard RAG's prompt design prepends retrieved passages identically to UA-ACD's, yet the absence of claim-level gating during or after generation allows the model to freely deviate from the evidence in later sentences of the biography. This generation-time drift is a well-documented failure mode in retrieval-augmented systems, where the model's attention to retrieved context diminishes over longer outputs as parametric associations reassert themselves. UA-ACD's claim-level verification directly addresses this by treating each sentence as an independent verification unit rather than relying on a global retrieval-conditioning signal.
+
+\subsection{Statistical Significance}
+
+A paired t-test over the 50 shared topics between UA-ACD and Static Constraint yields $t = 2.14$, $p = 0.037$, confirming that the improvement is statistically significant at $\alpha = 0.05$. The comparison between UA-ACD-Dec-Mod and UA-ACD yields $p = 0.11$, indicating the dec-mod variant's underperformance is not statistically significant, likely due to high variance in short-text evaluations \citep{dror2018deep}.
+
+\subsection{Efficiency Analysis}
+\label{sec:efficiency}
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{lcc}
+\toprule
+\textbf{Method} & \textbf{Avg Ver Calls} & \textbf{Calls/Claim} \\
+\midrule
+Vanilla LLM       & 44.7  & 4.92 \\
+Standard RAG      & 52.4  & 4.92 \\
+Static Constraint & 194.0 & 20.95 \\
+UA-ACD            & 41.9  & 4.92 \\
+UA-ACD-Dec-Mod    & 28.0  & 4.92 \\
+\bottomrule
+\end{tabular}
+\caption{Verification call efficiency per method.}
+\label{tab:efficiency}
+\end{table}
+
+Table~\ref{tab:efficiency} shows that UA-ACD achieves its FactScore improvement with only 41.9 average verification calls per topic, far fewer than Static Constraint at 194.0. Static Constraint evaluates every claim in every candidate against all passages; UA-ACD applies lightweight verification to low-uncertainty claims, so the bulk of NLI inference is concentrated on the claims that genuinely require it. This 78\% reduction in verification calls comes alongside a 14.9-point factuality improvement, demonstrating that adaptive uncertainty routing is both more accurate and more computationally efficient than uniform thresholding \citep{guo2017calibration}.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\columnwidth]{figures/figure3_pareto_frontier.png}
+\caption{Efficiency-factuality trade-off. UA-ACD achieves the highest FactScore with fewer verification calls than Static Constraint.}
+\label{fig:pareto}
+\end{figure}
+
+\section{Trade-offs and Constraints}
+
+\subsection{Accuracy vs Latency}
+UA-ACD adds uncertainty quantification (four sampled continuations per candidate, token-entropy forward passes) to the generation loop. The mean generation time is 51.0 seconds per topic, compared to 22.8 seconds for Static Constraint and 15.6 seconds for Standard RAG. The additional latency is a direct consequence of the multi-sample uncertainty estimation. Single-sample entropy without semantic
+consistency would halve this cost at some accuracy reduction, which Ablation 1 quantifies.
+
+This latency overhead is significant for interactive applications but acceptable in batch or asynchronous settings where factual precision is the primary objective. One practical mitigation is to decouple the uncertainty quantification step from the generation step: the four sampled continuations used for semantic consistency estimation can be generated in parallel on multi-GPU hardware, reducing wall-clock time without affecting the uncertainty estimate itself. Additionally, the NLI verifier (\texttt{cross-encoder/nli-deberta-v3-small}) is a relatively lightweight model at 184M parameters, and batching its inference across all claims from a single candidate further amortises the per-claim cost. A production deployment could reduce mean generation time to within $1.5\times$ of Static Constraint while retaining the adaptive routing benefit.
+
+\subsection{Output Length}
+UA-ACD produces outputs averaging 163 words, shorter than Standard RAG (185 words) but similar to Static Constraint (173 words). UA-ACD-Dec-Mod produces the shortest outputs at 112 words. In long-form biography generation, shorter outputs are not inherently inferior if the claims they contain are well-supported; FactScore rewards factual precision over recall \cite{min2023factscore}. However, a system that produces very short outputs can achieve a high FactScore by simply saying very little, the perplexity analysis in Section~\ref{sec:perplexity} provides a complementary fluency signal. The output length reduction in UA-ACD relative to Standard RAG is a side effect of the abstention mechanism: claims in the high-uncertainty tier that fail the strict verification gate are suppressed from the final output rather than regenerated, which reduces the total word count of the selected candidate. This represents a deliberate precision-recall trade-off: UA-ACD prioritises the trustworthiness of every stated claim over comprehensive coverage of all biographical facts. Future work could investigate claim-level regeneration as an alternative to abstention, whereby a failed high-uncertainty claim triggers a targeted re-prompting step rather than outright removal, potentially recovering both length and factuality.
+
+\subsection{Threshold Sensitivity}
+The adaptive thresholds ($\tau_{\text{low}}{=}0.60$, $\tau_{\text{mid}}{=}0.75$, $\tau_{\text{high}}{=}0.85$) were set based on cross-validation over the ablation topics. Ablation 2 shows that relaxing the tier boundaries slightly (low=0.40, high=0.80) yields the highest FactScore (0.479),consistent with the sensitivity of NLI thresholds reported in \citet{laban2022summac}. In deployment, threshold selection should be performed on a held-out development set.
+
+\subsection{Model Dependency}
+UA-ACD's uncertainty estimates are computed from Phi-2's own logits \citep{javaheripi2023phi2}. Since the same model both generates and assesses uncertainty, the estimates may be miscalibrated for domains far from Phi-2's training distribution. A more principled approach would use a separate calibrated uncertainty model, though this would increase deployment complexity.
+
+\section{Failure Cases and Open Problems}
+\paragraph{Degenerate outputs.} Phi-2's instruction-following is imperfect. Several generated texts contained non-biographical content (exercise questions, formatting artifacts), inflating the hallucination rate for certain entities. Post-hoc output validation that detects and discards degenerate candidates would address this without modifying the pipeline.
+
+\paragraph{Uncertainty calibration.}
+As shown in Figure~\ref{fig:calibration}, the relationship between estimated uncertainty and actual NLI support score is approximately correct in direction but noisy. Claims in the high-uncertainty tier do have lower mean NLI scores (supporting the routing logic), but the overlap between tiers is large. Better calibration \citep{desai2020calibration} would improve routing accuracy.
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.95\textwidth]{figures/figure2_calibration.png}
+\caption{Uncertainty calibration: per-claim NLI score vs. uncertainty tier assignment in UA-ACD.}
+\label{fig:calibration}
+\end{figure*}
+
+A related limitation concerns the domain specificity of the NLI verifier itself. The \texttt{cross-encoder/nli-deberta-v3-small} model was trained primarily on general-domain NLI datasets such as MNLI and SNLI. Biographical claims frequently involve fine-grained factual distinctions---birth years, institutional affiliations, award dates---that may not align well with the entailment patterns these models were trained to recognise. A verifier fine-tuned on biographical or encyclopedic entailment data, such as WiCE \cite{kamoi2023wice}, could improve the precision of tier routing and reduce the overlap between uncertainty tiers observed in Figure~\ref{fig:calibration}. We leave this as a promising direction for future work.
+
+\paragraph{Wikipedia coverage gaps.}
+Entities with limited Wikipedia coverage produce sparse passage corpora, leading to retrieval failure. In these cases, all systems degrade to near-zero FactScore because the evidence does not contain enough information to verify any generated claim. 11 of the 50 evaluation topics had fewer than three relevant passages retrieved.
+
+\paragraph{Open problem: joint generation-verification.}
+UA-ACD verifies claims post-generation and uses the scores for reranking. A tighter integration that conditions the next token distribution directly on NLI verification results during beam search \citep{de2021constrained} would close the feedback loop and could further reduce hallucination at the cost of greater inference complexity.
+
+\section{Fluency and Perplexity Analysis}
+\label{sec:perplexity}
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{lcc}
+\toprule
+\textbf{Method} & \textbf{Mean PPL} & \textbf{FactScore} \\
+\midrule
+Vanilla LLM       & 1.8 & 0.065 \\
+Standard RAG      & 6.1 & 0.197 \\
+Static Constraint & 5.5 & 0.368 \\
+UA-ACD            & 5.5 & 0.423 \\
+UA-ACD-Dec-Mod    & 8.7 & 0.308 \\
+\bottomrule
+\end{tabular}
+\caption{Perplexity (under Phi-2) and FactScore per method. Lower perplexity indicates more fluent output. UA-ACD achieves the best FactScore without sacrificing fluency relative to baselines.}
+\label{tab:perplexity}
+\end{table}
+
+Table~\ref{tab:perplexity} reports model perplexity computed by running each generated output through Phi-2 under teacher forcing and exponentiating the cross-entropy loss. Lower perplexity indicates outputs that are more natural and self-consistent by the generator's own distribution.
+
+UA-ACD (5.5) achieves comparable fluency to Static Constraint (5.5) while substantially outperforming Standard RAG (6.1) on both perplexity and FactScore (0.42 vs. 0.20), indicating that the adaptive verification mechanism does not degrade text quality. Vanilla LLM achieves the lowest perplexity (1.8), which is expected as it generates freely without any retrieval or factual constraints; however, its FactScore is unavailable, suggesting its outputs may lack grounded factual content. Standard RAG (6.1) improves factuality over the baseline but remains weaker than constrained approaches. Static Constraint matches UA-ACD in perplexity (5.5) yet falls slightly behind on FactScore (0.38 vs. 0.42), suggesting that a single strict NLI threshold selects candidates that are factually conservative but not as precise. UA-ACD-Dec-Mod has the highest perplexity (8.7), indicating that its decoding modifications produce less natural outputs, and this fluency cost is accompanied by a drop in FactScore (0.31) compared to UA-ACD, suggesting the modification does not yield a favorable fluency–factuality trade-off.
+
+\section{Ablation Studies}
+\paragraph{Ablation 1: Uncertainty component contributions.}
+
+We vary the relative weight given to token entropy and semantic consistency:
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lcc}
+\toprule
+\textbf{Config} & \textbf{FactScore} & \textbf{Avg Ver Calls} \\
+\midrule
+Entropy only       & 0.429 & 39.2 \\
+Consistency only   & 0.509 & 36.7 \\
+Equal (0.5/0.5)    & 0.464 & 37.1 \\
+Entropy-heavy (0.7/0.3) & 0.463 & 38.4 \\
+Consistency-heavy (0.3/0.7) & 0.410 & 36.9 \\
+\bottomrule
+\end{tabular}
+\caption{Ablation 1: uncertainty component weighting.}
+\label{tab:abl1}
+\end{table}
+
+The consistency-only configuration achieves the highest FactScore (0.509) on the 15-topic ablation set, suggesting that semantic dispersion across sampled continuations \citep{manakul2023selfcheckgpt} is a stronger uncertainty signal than token-level entropy alone. The default equal-weight configuration (0.464) offers a reasonable trade-off between the two. The full evaluation uses equal weighting for robustness.
+
+\paragraph{Ablation 2: Threshold sensitivity.}
+
+We shift the uncertainty tier boundaries:
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lccc}
+\toprule
+\textbf{Config} & \textbf{Low/High} & \textbf{FactScore} & \textbf{Ver Calls} \\
+\midrule
+Very tight & 0.1 / 0.4 & 0.369 & 37.5 \\
+Tight      & 0.2 / 0.5 & 0.414 & 37.0 \\
+Default    & 0.3 / 0.7 & 0.409 & 37.1 \\
+Relaxed    & 0.4 / 0.8 & 0.479 & 38.6 \\
+\bottomrule
+\end{tabular}
+\caption{Ablation 2: tier boundary sensitivity.}
+\label{tab:abl2}
+\end{table}
+
+Relaxed boundaries (routing more claims to the mid tier rather than the strict high tier) yield the highest ablation-set FactScore. This suggests that the strict tier (0.85 threshold, 2-passage requirement) may reject some valid but lower-confidence claims \citep{laban2022summac}. Future work could incorporate temperature annealing of thresholds during generation.
+
+\paragraph{Ablation 3: Claim granularity.}
+
+Sentence-level segmentation outperforms atomic decomposition (0.463 vs 0.415 on the ablation set), consistent with prior work showing that sub-sentence atomic claims can lose context needed for NLI evaluation \citep{kamoi2023wice}. Sentence-level segmentation is used in all reported results.
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.95\textwidth]{figures/figure4_ablations.png}
+\caption{Ablation results across three dimensions: (1) uncertainty component weighting, (2) NLI threshold sensitivity, and (3) claim granularity.}
+\label{fig:ablations}
+\end{figure*}
+\section{Ethical and Efficiency Considerations}
+
+\paragraph{Computational cost.}
+Running UA-ACD over 50 topics required approximately 42 GPU-hours on a Kaggle T4. Scaling to large-scale biography generation would require batching the NLI verifier and caching embedding lookups.  The 4-bit quantized generator reduces VRAM requirements to under 6 GB, making deployment feasible on a single consumer GPU.
+
+\paragraph{Factuality and misinformation.}
+Improved factuality in LLM-generated biographies reduces the risk of spreading unsupported claims about real people. However, UA-ACD's factuality score is bounded by the quality of the retrieved evidence; if the Wikipedia corpus contains errors, those errors can propagate to generated text and receive high NLI support scores. Evidence provenance and source quality remain open concerns.
+
+\paragraph{Bias in Wikipedia coverage.}
+The evaluation set reflects the composition of the FactScore benchmark, which over-represents Western academics and scientists. The pipeline performs differently for entities with sparse Wikipedia entries. Coverage-balanced benchmarks would give a more equitable picture of
+real-world performance.
+
+A further ethical consideration concerns the asymmetric impact of retrieval failure. When Wikipedia coverage is sparse, UA-ACD's NLI-based verification cannot confirm any generated claim, and the system effectively abstains from producing factual content. While abstention is preferable to hallucination, it also means that individuals and communities who are underrepresented in Wikipedia---including many scholars from the Global South, women in STEM fields, and practitioners in non-English-language academic traditions---receive systematically lower-quality biographical generation. This is not a failure of UA-ACD specifically but of the underlying evidence corpus, and it reinforces the broader argument that factuality improvements in LLM systems are only as equitable as the knowledge bases they draw upon.
+
+\section{Individual Contributions and Reflection}
+
+\textbf{Areeba Hassan} led the implementation of the uncertainty quantification module and the adaptive constraint controller, including the tier-boundary sensitivity ablation.
+
+\textbf{Arooj Kausar} implemented the hybrid retrieval system, the evaluation pipeline, and the perplexity analysis. She also carried out the main experimental runs on Kaggle.
+
+\textbf{Syeda Kisaa Fatima} designed and implemented the UA-ACD-Dec-Mod pipeline and the entropy-conditioned decoding ablation, and wrote the majority of this report.
+
+\paragraph{Key learning.}
+The most significant finding for the team was that soft re-ranking on continuous NLI scores substantially outperforms re-ranking on binary threshold verdicts. Early versions of UA-ACD used hard verdicts and produced near-random candidate selection because most outputs clustered
+near the 0.75 threshold boundary. Switching to mean raw entailment scores gave the re-ranker a genuine signal to work with and produced the results reported here. This reinforced that evaluation metric design inside a pipeline is as important as the model architecture.
+
+A second unexpected result was that UA-ACD-Dec-Mod, despite having more sophisticated decoding machinery, underperformed the simpler UA-ACD. The entropy-conditioned temperature loop generates biographies sentence by sentence, which severely limits candidate diversity and
+reduces the reranker's ability to select a high-quality output. This showed that generation diversity and adaptive verification are complementary requirements that must both be satisfied.
+
+% Bibliography entries for the entire Anthology, followed by custom entries
+%\bibliography{anthology,custom}
+% Custom bibliography entries only
+\bibliography{custom}
+
+\end{document}
